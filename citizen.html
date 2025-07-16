@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>트리케어 - 시민 참여</title>
+    <style>
+        /* CSS 스타일은 이전과 동일 */
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            height: 50px;
+            background-color: #f8f8f8;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .header h3 {
+            margin: 0;
+        }
+
+        #my-points {
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        #map {
+            width: 100%;
+            height: calc(100% - 52px);
+        }
+
+        .infowindow-content {
+            padding: 15px;
+            font-size: 14px;
+            line-height: 1.6;
+            width: 280px;
+        }
+
+        .infowindow-content .title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        .infowindow-content button {
+            margin-top: 5px;
+            padding: 8px 12px;
+            border: none;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .adopt-btn {
+            background-color: #28a745;
+        }
+
+        .water-btn {
+            background-color: #007bff;
+        }
+
+        .disabled-btn {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h3>🌳 우리 동네 나무 돌보기 🌳</h3>
+        <div id="my-points">내 포인트: <span id="points-value">0</span> P</div>
+    </div>
+    <div id="map"></div>
+
+    <script type="text/javascript"
+        src="//dapi.kakao.com/v2/maps/sdk.js?appkey=dfb25b13fdfefb4a64d2bb0b2beb4084&libraries=services"></script>
+
+    <script>
+        const mapContainer = document.getElementById('map');
+        const mapOption = { center: new kakao.maps.LatLng(37.4200, 127.1266), level: 8 };
+        const map = new kakao.maps.Map(mapContainer, mapOption);
+
+        let userPoints = 0;
+        const adoptedTreeIds = new Set();
+        const markers = [];
+        let openedInfoWindow = null;
+
+        // 마커 이미지 정의 
+        const imageSrcGreen = './images/marker_green.png';
+        const imageSrcRed = './images/marker_red.png';
+        const imageSrcBlue = './images/marker_blue.png';
+        const imageSrcGray = './images/marker_gray.png';
+        const imageSrcOrange = './images/marker_orange.png';
+        const markerImageSize = new kakao.maps.Size(24, 35);
+        const markerImageGreen = new kakao.maps.MarkerImage(imageSrcGreen, markerImageSize);
+        const markerImageRed = new kakao.maps.MarkerImage(imageSrcRed, markerImageSize);
+        const markerImageBlue = new kakao.maps.MarkerImage(imageSrcBlue, markerImageSize);
+        const markerImageGray = new kakao.maps.MarkerImage(imageSrcGray, markerImageSize);
+        const markerImageOrange = new kakao.maps.MarkerImage(imageSrcOrange, markerImageSize);
+
+        fetch('trees.json')
+            .then(response => response.json())
+            .then(treeData => {
+                treeData.forEach((data, index) => {
+                    data.id = index;
+                    // ★★★ '다른 사용자'가 입양한 나무 시뮬레이션 ★★★
+                    data.owner = null;
+                    if (index % 15 === 0) { // 15그루 중 1그루는 다른 사람이 입양했다고 가정
+                        data.owner = 'other_user';
+                    }
+
+
+                    // ★★★ 마커 표시 로직  ★★★
+                    let markerImage;
+                    if (data.owner === 'other_user') { // 다른 사용자가 입양한 나무
+                        markerImage = markerImageGray;
+                    } else if (data.moisture < 40) { // 위험한 나무
+                        markerImage = markerImageRed;
+                    } else if (data.moisture < 60) {
+                        markerImage = markerImageOrange; // 주의 나무
+                    } else {
+                        markerImage = markerImageGreen; // 건강한 나무
+                    }
+
+                    const position = new kakao.maps.LatLng(data.lat, data.lng);
+                    const marker = new kakao.maps.Marker({ map, position, title: data.title, image: markerImage });
+                    const infowindow = new kakao.maps.InfoWindow({ removable: true });
+
+                    kakao.maps.event.addListener(marker, 'click', function () {
+                        infowindow.setContent(getInfoWindowContent(data));
+                        if (openedInfoWindow === infowindow) {
+                            infowindow.close();
+                            openedInfoWindow = null;
+                        } else {
+                            if (openedInfoWindow) openedInfoWindow.close();
+                            infowindow.open(map, marker);
+                            openedInfoWindow = infowindow;
+                        }
+                    });
+                    markers.push({ marker, infowindow, data });
+                });
+            })
+            .catch(error => console.error('데이터를 불러오는 중 에러 발생:', error));
+
+        function getInfoWindowContent(data) {
+            const isAdoptedByMe = adoptedTreeIds.has(data.id);
+            const isAdoptedByOther = data.owner === 'other_user';
+            const needsWater = data.moisture < 40;
+            const cautionWater = data.moisture < 60;
+            const moistureInfo = `<span>토양 수분: ${data.moisture}%</span><br>`;
+            let buttonHtml = '';
+
+            if (isAdoptedByMe) {
+                buttonHtml = `<button class="water-btn" onclick="waterMyTree(${data.id})">물 주기 (내 나무)💧</button>`;
+            } else if (isAdoptedByOther) {
+                buttonHtml = `<button class="disabled-btn" disabled>다른 사용자가 입양한 나무</button>`;
+            } else { // 주인 없는 나무
+                if (needsWater || cautionWater) {
+                    // 물 부족 시, 입양과 물주기 버튼 모두 표시
+                    buttonHtml = `<button class="adopt-btn" onclick="adoptTree(${data.id})">입양하기</button>
+                              <button class="water-btn" onclick="waterPublicTree(${data.id})">물 주기</button>`;
+                } else {
+                    // 건강하면 입양 버튼만 표시
+                    buttonHtml = `<button class="adopt-btn" onclick="adoptTree(${data.id})">입양하기</button>`;
+                }
+            }
+            return `<div class="infowindow-content"><div class="title">${data.title}</div>${moistureInfo}${buttonHtml}</div>`;
+        }
+
+        function adoptTree(treeId) {
+            adoptedTreeIds.add(treeId);
+            const tree = markers.find(m => m.data.id === treeId);
+            if (tree) {
+                tree.marker.setImage(markerImageBlue);
+                tree.infowindow.setContent(getInfoWindowContent(tree.data));
+            }
+            alert(`${tree.data.title} 나무를 입양했습니다!`);
+        }
+
+        // ★★★ '내 나무'에 물 주기 함수 ★★★
+        function waterMyTree(treeId) {
+            const tree = markers.find(m => m.data.id === treeId);
+            if (!tree) return;
+            if (tree.data.moisture < 60) {
+                tree.data.moisture = 100;
+                tree.marker.setImage(markerImageBlue);
+                userPoints += 10; // 내 나무는 10 포인트
+                document.getElementById('points-value').innerText = userPoints;
+                alert(`내 나무에 물을 주셨네요! 고맙습니다.\n(+10 포인트 획득!)`);
+            } else {
+                alert('이 나무는 이미 건강한 상태입니다!');
+            }
+            tree.infowindow.close();
+            openedInfoWindow = null;
+        }
+
+        // ★★★ '주인 없는 나무'에 물 주기 함수 ★★★
+        function waterPublicTree(treeId) {
+            const tree = markers.find(m => m.data.id === treeId);
+            if (!tree) return;
+            if (tree.data.moisture < 60) {
+                tree.data.moisture = 100;
+                tree.marker.setImage(markerImageGreen); // 주인 없는 나무는 그냥 초록색으로 변경
+                userPoints += 5; // 공공 활동은 5 포인트
+                document.getElementById('points-value').innerText = userPoints;
+                alert(`주인 없는 나무를 돌봐주셨군요! 감사합니다.\n(+5 포인트 획득!)`);
+            }
+            tree.infowindow.close();
+            openedInfoWindow = null;
+        }
+
+    </script>
+</body>
+
+</html>

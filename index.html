@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>트리케어 관리자 대시보드</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .infowindow-content {
+            padding: 15px;
+            font-size: 14px;
+            line-height: 1.6;
+            width: 280px;
+        }
+
+        .infowindow-content .title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        /* ★★★ 통계 패널 스타일 (추가) ★★★ */
+        #stats-panel {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+            font-size: 14px;
+            width: 220px;
+        }
+
+        #stats-panel h4 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+
+        #stats-panel p {
+            margin: 8px 0;
+        }
+
+        #filter-controls {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+            padding: 5px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        #filter-controls button {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            background-color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #filter-controls button:hover {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="stats-panel">
+        <h4>📊 실시간 가로수 현황</h4>
+        <p><strong>총 가로수:</strong> <span id="total-trees">0</span>그루</p>
+        <p><strong><span style="color: #008000;">●</span> 건강한 나무:</strong> <span id="healthy-trees">0</span>그루</p>
+        <p><strong><span style="color: #FF0000;">●</span> 물 부족 나무:</strong> <span id="danger-trees">0</span>그루</p>
+    </div>
+
+    <div id="filter-controls">
+        <button onclick="filterMarkers('all')">전체 보기</button>
+        <button onclick="filterMarkers('healthy')">건강한 나무</button>
+        <button onclick="filterMarkers('danger')">물 부족 나무</button>
+    </div>
+
+
+    <div id="map"></div>
+
+    <script type="text/javascript"
+        src="//dapi.kakao.com/v2/maps/sdk.js?appkey=dfb25b13fdfefb4a64d2bb0b2beb4084&libraries=services"></script>
+
+    <script>
+        const mapContainer = document.getElementById('map');
+        const mapOption = {
+            center: new kakao.maps.LatLng(37.4200, 127.1266),
+            level: 8
+        };
+        const map = new kakao.maps.Map(mapContainer, mapOption);
+
+        // 마커와 인포윈도우를 저장할 배열을 script 최상단으로 이동
+        const markers = [];
+
+        //통계 업데이트 함수
+        function updateStats() {
+            const totalCount = markers.length;
+            let healthyCount = 0;
+            let dangerCount = 0;
+
+            for (const tree of markers) {
+                if (tree.data.moisture < 40) {
+                    dangerCount++;
+                } else {
+                    healthyCount++;
+                }
+            }
+
+            document.getElementById('total-trees').innerText = totalCount;
+            document.getElementById('healthy-trees').innerText = healthyCount;
+            document.getElementById('danger-trees').innerText = dangerCount;
+        }
+        //필터링 함수
+        function filterMarkers(status) {
+            for (const tree of markers) {
+                const isDanger = tree.data.moisture < 40;
+
+                if (status === 'all') {
+                    tree.marker.setMap(map); // 모든 마커를 지도에 표시
+                } else if (status === 'healthy') {
+                    tree.marker.setMap(isDanger ? null : map); // 건강한 나무만 표시
+                } else if (status === 'danger') {
+                    tree.marker.setMap(isDanger ? map : null); // 위험한 나무만 표시
+                }
+            }
+        }
+
+        fetch('trees.json')
+            .then(response => response.json())
+            .then(treeData => {
+                const imageSrcGreen = './images/marker_green.png';
+                const imageSrcRed = './images/marker_red.png';
+                const markerImageSize = new kakao.maps.Size(24, 35);
+                const markerImageGreen = new kakao.maps.MarkerImage(imageSrcGreen, markerImageSize);
+                const markerImageRed = new kakao.maps.MarkerImage(imageSrcRed, markerImageSize);
+                let openedInfoWindow = null;
+
+                for (const data of treeData) {
+                    const markerImage = data.moisture < 40 ? markerImageRed : markerImageGreen;
+                    const position = new kakao.maps.LatLng(data.lat, data.lng);
+                    const marker = new kakao.maps.Marker({ map, position, title: data.title, image: markerImage });
+                    const content = `<div class="infowindow-content"><div class="title">${data.title}</div><span>토양 수분: ${data.moisture}%</span></div>`;
+                    const infowindow = new kakao.maps.InfoWindow({ content, removable: true });
+
+                    kakao.maps.event.addListener(marker, 'click', function () {
+                        if (openedInfoWindow === infowindow) {
+                            infowindow.close();
+                            openedInfoWindow = null;
+                        } else {
+                            if (openedInfoWindow) openedInfoWindow.close();
+                            infowindow.open(map, marker);
+                            openedInfoWindow = infowindow;
+                        }
+                    });
+                    markers.push({ marker, infowindow, data });
+                }
+
+                //최초 통계 업데이트
+                updateStats();
+
+                // 데이터 시뮬레이션
+                setInterval(function () {
+                    if (markers.length === 0) return;
+                    const randomIndex = Math.floor(Math.random() * markers.length);
+                    const randomTree = markers[randomIndex];
+                    const newMoisture = Math.floor(Math.random() * 101);
+                    randomTree.data.moisture = newMoisture;
+
+                    const newImage = newMoisture < 40 ? markerImageRed : markerImageGreen;
+                    randomTree.marker.setImage(newImage);
+
+                    const newContent = `<div class="infowindow-content"><div class="title">${randomTree.data.title}</div><span>토양 수분: ${newMoisture}%</span></div>`;
+                    randomTree.infowindow.setContent(newContent);
+
+                    //시뮬레이션 후 통계 업데이트
+                    updateStats();
+                }, 3000);
+
+            })
+            .catch(error => console.error('데이터를 불러오는 중 에러 발생:', error));
+
+    </script>
+
+</body>
+
+</html>
